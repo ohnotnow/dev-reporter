@@ -1,0 +1,12 @@
+[project]
+name = "dev-reporter"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "litellm>=1.66.0",
+    "pydantic>=2.11.3",
+    "pygithub>=2.6.1",
+    "python-dotenv>=1.1.0",
+]
