@@ -5,6 +5,7 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "gitpython>=3.1.44",
     "litellm>=1.66.0",
     "pydantic>=2.11.3",
     "pygithub>=2.6.1",

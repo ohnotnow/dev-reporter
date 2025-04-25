@@ -6,7 +6,7 @@ from packaging import version
 from github import Github, GithubException
 from datetime import datetime, timedelta
 from pydantic import BaseModel
-
+from agents.base import BaseAgent
 class IssueStats(BaseModel):
     total_issues: Optional[int] = None
     open_issues: Optional[int] = None
@@ -24,12 +24,27 @@ class LaravelStats(BaseModel):
     issue_stats: IssueStats
 
 
-class LaravelStatsAgent:
-    def __init__(self, org_name: str):
-        self.org_name = org_name
+class LaravelStatsAgent(BaseAgent):
+    # this agent will be used to get the laravel/php-specific stats for a given github repo
+    def __init__(self, base_type: str, name: str, model: str = "o4-mini", provider: str = "openai"):
+        super().__init__(model, provider)
+        self.base_type = base_type
+        self.name = name
+        self.client = self.get_github_client()
+        self.entity = self.get_github_entity(base_type, name)
 
     def get_github_client(self):
         return Github(os.getenv("GITHUB_API_TOKEN"))
+
+    def get_github_entity(self, base_type, name):
+        if base_type == 'team':
+            return self.client.get_team(name)
+        elif base_type == 'repo':
+            return self.client.get_repo(name)
+        elif base_type == 'org':
+            return self.client.get_organization(name)
+        else:
+            raise ValueError(f"Invalid base type: {base_type}")
 
     def get_issues_in_repo(self, repo):
         all_issues = repo.get_issues()
@@ -118,6 +133,16 @@ class LaravelStatsAgent:
                 newest_version_str = laravel_version_str
 
         return newest_branch, newest_version_str
+
+    def get_composer_stats(self, app):
+        # make a temp dir
+        # download composer.json and composer.lock into the temp dir
+        #
+        # to use composer.lock without installing the packages :
+        # composer audit --format=json --locked --no-dev
+        # composer show --latest --format=json --locked --no-dev
+        # composer licenses --no-dev --format=json
+        pass
 
     def get_laravel_versions_in_projects(self):
         client = self.get_github_client()
