@@ -7,61 +7,19 @@ from github import Github, GithubException
 from datetime import datetime, timedelta
 from pydantic import BaseModel
 from agents.base import BaseAgent
-class IssueStats(BaseModel):
-    total_issues: Optional[int] = None
-    open_issues: Optional[int] = None
-    closed_issues_this_month: Optional[int] = None
+from github.Repository import Repository
 
 class LaravelStats(BaseModel):
-    repo: str
-    description: Optional[str] = None
-    default_laravel_version: str
+    name: str
     php_version: str
-    branches: list[str]
+    current_laravel_version: str
     newest_laravel_branch: str
     newest_laravel_version: str
-    commits_this_month: Optional[int] = None
-    issue_stats: IssueStats
 
 
 class LaravelStatsAgent(BaseAgent):
-    # this agent will be used to get the laravel/php-specific stats for a given github repo
-    def __init__(self, base_type: str, name: str, model: str = "o4-mini", provider: str = "openai"):
-        super().__init__(model, provider)
-        self.base_type = base_type
-        self.name = name
-        self.client = self.get_github_client()
-        self.entity = self.get_github_entity(base_type, name)
-
-    def get_github_client(self):
-        return Github(os.getenv("GITHUB_API_TOKEN"))
-
-    def get_github_entity(self, base_type, name):
-        if base_type == 'team':
-            return self.client.get_team(name)
-        elif base_type == 'repo':
-            return self.client.get_repo(name)
-        elif base_type == 'org':
-            return self.client.get_organization(name)
-        else:
-            raise ValueError(f"Invalid base type: {base_type}")
-
-    def get_issues_in_repo(self, repo):
-        all_issues = repo.get_issues()
-        total_issues = all_issues.totalCount
-        if total_issues == 0:
-            return IssueStats(
-                total_issues=0,
-                open_issues=0,
-                closed_issues_this_month=0,
-            )
-        open_issues = repo.get_issues(state="open").totalCount
-        closed_issues_this_month = repo.get_issues(state="closed", since=datetime.now() - timedelta(days=30)).totalCount
-        return IssueStats(
-            total_issues=total_issues,
-            open_issues=open_issues,
-            closed_issues_this_month=closed_issues_this_month,
-        )
+    def run(self, repo: Repository) -> LaravelStats:
+        pass
 
     def parse_laravel_version(self, version_str):
         """
@@ -88,12 +46,12 @@ class LaravelStatsAgent(BaseAgent):
 
         return version.parse(f"{major_version}.0")
 
-    def get_laravel_version_from_branch(self, app, branch_name):
+    def get_laravel_version_from_branch(self, repo: Repository, branch_name: str):
         """
         Get Laravel version from composer.json in a specific branch
         """
         try:
-            composer_json = app.get_contents("composer.json", ref=branch_name)
+            composer_json = repo.get_contents("composer.json", ref=branch_name)
             composer_json_content = json.loads(composer_json.decoded_content.decode("utf-8"))
             laravel_version = composer_json_content["require"].get("laravel/framework")
             return laravel_version
@@ -142,75 +100,58 @@ class LaravelStatsAgent(BaseAgent):
         # composer audit --format=json --locked --no-dev
         # composer show --latest --format=json --locked --no-dev
         # composer licenses --no-dev --format=json
+        #
+        # For each package we want to know
+        # - name
+        # - description
+        # - installed version
+        # - latest version
+        # - license
+        # - list of security advisories
         pass
 
-    def get_laravel_versions_in_projects(self):
-        client = self.get_github_client()
-        org = client.get_organization(self.org_name)
-        repos = org.get_repos()
+    def get_laravel_version(self, repo: Repository):
+        full_name = f"{self.entity.login}/{repo.name}"
+        app = self.client.get_repo(full_name)
 
-        results = []
+        try:
+            # Get composer.json from the default branch
+            composer_json = app.get_contents("composer.json")
+            composer_json_content = json.loads(composer_json.decoded_content.decode("utf-8"))
+            laravel_version = composer_json_content["require"].get("laravel/framework")
+            php_version = composer_json_content["require"].get("php")
 
-        for repo in repos:
-            full_name = f"{self.org_name}/{repo.name}"
-            app = client.get_repo(full_name)
+            if not php_version:
+                print(f"No PHP version found in {full_name}")
+                return None
 
-            try:
-                # Get composer.json from the default branch
-                composer_json = app.get_contents("composer.json")
-                composer_json_content = json.loads(composer_json.decoded_content.decode("utf-8"))
-                laravel_version = composer_json_content["require"].get("laravel/framework")
-                php_version = composer_json_content["require"].get("php")
+            if not laravel_version:
+                print(f"No Laravel version found in {full_name}")
+                return None
 
-                if not php_version:
-                    print(f"No PHP version found in {full_name}")
-                    continue
+            print(f"Found composer.json in {full_name}:")
+            print(f"Laravel version: {laravel_version}")
+            print(f"PHP version: {php_version}")
+            branches = list(app.get_branches())
+            branch_names = [branch.name for branch in branches]
 
-                if not laravel_version:
-                    print(f"No Laravel version found in {full_name}")
-                    continue
+            # Find the branch with the newest Laravel version
+            newest_branch, newest_version = self.find_newest_laravel_version_branch(app, branches)
 
-                print(f"Found composer.json in {full_name}:")
-                print(f"Laravel version: {laravel_version}")
-                print(f"PHP version: {php_version}")
-                recent_commits = app.get_commits(since=datetime.now() - timedelta(days=30))
-                print(f"Recent commits: {recent_commits}")
-                issues = self.get_issues_in_repo(app)
-                print(f"Issues: {issues}")
-                # Get all branches
-                branches = list(app.get_branches())
-                branch_names = [branch.name for branch in branches]
-                print("Branches:")
-                for name in branch_names:
-                    print(f"- {name}")
+            return LaravelStats(
+                repo=full_name,
+                description=repo.description or 'No description',
+                default_laravel_version=laravel_version,
+                php_version=php_version,
+                branches=branch_names,
+                newest_laravel_branch=newest_branch,
+                newest_laravel_version=newest_version,
+            )
 
-                # Find the branch with the newest Laravel version
-                newest_branch, newest_version = self.find_newest_laravel_version_branch(app, branches)
+        except GithubException as e:
+            print(f"No composer.json in {full_name}: skipping")
 
-                if newest_branch:
-                    print(f"Newest Laravel version ({newest_version}) found in branch: {newest_branch}")
-                else:
-                    print("No Laravel version found in any branch")
-
-                print(f"Repo description: {repo.description}")
-                results.append(LaravelStats(
-                    repo=full_name,
-                    description=repo.description or 'No description',
-                    default_laravel_version=laravel_version,
-                    php_version=php_version,
-                    branches=branch_names,
-                    newest_laravel_branch=newest_branch,
-                    newest_laravel_version=newest_version,
-                    commits_this_month=recent_commits.totalCount,
-                    issue_stats=issues,
-                ))
-
-                print("-" * 80)
-
-            except GithubException as e:
-                print(f"No composer.json in {full_name}: skipping")
-
-        return results
+        return None
 
 if __name__ == "__main__":
     agent = LaravelStatsAgent("UoGSoE")

@@ -12,6 +12,21 @@ class BaseAgent:
         self.model = model
         self.provider = provider
         self.model_name = f"{self.provider}/{self.model}"  # litellm expects this format
+        self.client = self.get_github_client()
+        self.entity = self.get_github_entity()
+
+    def get_github_client(self):
+        return Github(os.getenv("GITHUB_API_TOKEN"))
+
+    def get_github_entity(self, base_type, name):
+        if base_type == 'team':
+            return self.client.get_team(name)
+        elif base_type == 'repo':
+            return self.client.get_repo(name)
+        elif base_type == 'org':
+            return self.client.get_organization(name)
+        else:
+            raise ValueError(f"Invalid base type: {base_type}")
 
     def get_llm_response(self, prompt: str) -> LlmResponse:
         response = completion(
