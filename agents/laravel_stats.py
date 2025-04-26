@@ -1,13 +1,11 @@
 import json
 import re
 import os
+import subprocess
+import sys
 from typing import Optional
 from packaging import version
-from github import Github, GithubException
-from datetime import datetime, timedelta
 from pydantic import BaseModel
-from agents.base import BaseAgent
-from github.Repository import Repository
 
 class LaravelStats(BaseModel):
     name: str
@@ -16,47 +14,75 @@ class LaravelStats(BaseModel):
     newest_laravel_branch: str
     newest_laravel_version: str
 
+class LaravelStatsAgent():
+    def __init__(self, code_path: str):
+        self.code_path = code_path
 
-class LaravelStatsAgent(BaseAgent):
-    def run(self, repo: Repository) -> LaravelStats:
-        pass
+    def run(self) -> LaravelStats:
+        # Get all branches
+        branches = self.get_all_branches()
+        # Get current branch
+        current_branch = self.get_current_branch()
+        # Get composer.json from current branch
+        composer_json = self.read_composer_json()
+        if not composer_json:
+            raise RuntimeError(f"No composer.json found in {self.code_path}")
+        laravel_version = composer_json["require"].get("laravel/framework")
+        php_version = composer_json["require"].get("php")
+        if not laravel_version or not php_version:
+            raise RuntimeError(f"composer.json missing laravel/framework or php in {self.code_path}")
+        # Find the branch with the newest Laravel version
+        newest_branch, newest_version = self.find_newest_laravel_version_branch(branches)
+        # Restore original branch
+        self.checkout_branch(current_branch)
+        return LaravelStats(
+            name=os.path.basename(self.code_path),
+            php_version=php_version,
+            current_laravel_version=laravel_version,
+            newest_laravel_branch=newest_branch,
+            newest_laravel_version=newest_version,
+        )
 
     def parse_laravel_version(self, version_str):
-        """
-        Parse Laravel version string into a sortable version object.
-        Extracts only the major version number (e.g. "11" from "^11.7.21").
-        """
         if not version_str:
             return None
-
-        # Extract just the major version number
         match = re.search(r'(\d+)', version_str)
         if not match:
             return None
-
         major_version = int(match.group(1))
-
-        # Handle version ranges, take the minimum required major version
         if "|" in version_str:
             versions = version_str.split("|")
             parsed_versions = [self.parse_laravel_version(v) for v in versions if self.parse_laravel_version(v)]
             if parsed_versions:
                 return min(parsed_versions)
             return None
-
         return version.parse(f"{major_version}.0")
 
-    def get_laravel_version_from_branch(self, repo: Repository, branch_name: str):
-        """
-        Get Laravel version from composer.json in a specific branch
-        """
-        try:
-            composer_json = repo.get_contents("composer.json", ref=branch_name)
-            composer_json_content = json.loads(composer_json.decoded_content.decode("utf-8"))
-            laravel_version = composer_json_content["require"].get("laravel/framework")
-            return laravel_version
-        except GithubException:
+    def get_all_branches(self):
+        result = subprocess.run(["git", "branch", "-a", "--format=%(refname:short)"], cwd=self.code_path, capture_output=True, text=True)
+        if result.returncode != 0:
+            raise RuntimeError(f"git branch failed: {result.stderr}")
+        branches = [b.strip() for b in result.stdout.splitlines() if b.strip()]
+        # Remove duplicates
+        return list(sorted(set(branches)))
+
+    def get_current_branch(self):
+        result = subprocess.run(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=self.code_path, capture_output=True, text=True)
+        if result.returncode != 0:
+            raise RuntimeError(f"git rev-parse failed: {result.stderr}")
+        return result.stdout.strip()
+
+    def checkout_branch(self, branch_name):
+        result = subprocess.run(["git", "checkout", branch_name], cwd=self.code_path, capture_output=True, text=True)
+        if result.returncode != 0:
+            raise RuntimeError(f"git checkout {branch_name} failed: {result.stderr}")
+
+    def read_composer_json(self):
+        composer_path = os.path.join(self.code_path, "composer.json")
+        if not os.path.exists(composer_path):
             return None
+        with open(composer_path, "r") as f:
+            return json.load(f)
 
     def should_skip_branch(self, branch_name):
         skipped_branches = ["dependabot", "snyk", "experiment", "feature"]
@@ -65,98 +91,37 @@ class LaravelStatsAgent(BaseAgent):
                 return True
         return False
 
-    def find_newest_laravel_version_branch(self, app, branches):
-        """
-        Find the branch with the newest Laravel version
-        """
+    def get_laravel_version_from_branch(self, branch_name):
+        try:
+            self.checkout_branch(branch_name)
+            composer_json = self.read_composer_json()
+            if not composer_json:
+                return None
+            laravel_version = composer_json["require"].get("laravel/framework")
+            return laravel_version
+        except Exception:
+            return None
+
+    def find_newest_laravel_version_branch(self, branches):
         newest_version = None
         newest_branch = None
         newest_version_str = None
-
         for branch in branches:
-            if self.should_skip_branch(branch.name):
+            if self.should_skip_branch(branch):
                 continue
-
-            laravel_version_str = self.get_laravel_version_from_branch(app, branch.name)
+            laravel_version_str = self.get_laravel_version_from_branch(branch)
             if not laravel_version_str:
                 continue
-
             parsed_version = self.parse_laravel_version(laravel_version_str)
             if not parsed_version:
                 continue
-
             if newest_version is None or parsed_version > newest_version:
                 newest_version = parsed_version
-                newest_branch = branch.name
+                newest_branch = branch
                 newest_version_str = laravel_version_str
-
         return newest_branch, newest_version_str
 
-    def get_composer_stats(self, app):
-        # make a temp dir
-        # download composer.json and composer.lock into the temp dir
-        #
-        # to use composer.lock without installing the packages :
-        # composer audit --format=json --locked --no-dev
-        # composer show --latest --format=json --locked --no-dev
-        # composer licenses --no-dev --format=json
-        #
-        # For each package we want to know
-        # - name
-        # - description
-        # - installed version
-        # - latest version
-        # - license
-        # - list of security advisories
-        pass
-
-    def get_laravel_version(self, repo: Repository):
-        full_name = f"{self.entity.login}/{repo.name}"
-        app = self.client.get_repo(full_name)
-
-        try:
-            # Get composer.json from the default branch
-            composer_json = app.get_contents("composer.json")
-            composer_json_content = json.loads(composer_json.decoded_content.decode("utf-8"))
-            laravel_version = composer_json_content["require"].get("laravel/framework")
-            php_version = composer_json_content["require"].get("php")
-
-            if not php_version:
-                print(f"No PHP version found in {full_name}")
-                return None
-
-            if not laravel_version:
-                print(f"No Laravel version found in {full_name}")
-                return None
-
-            print(f"Found composer.json in {full_name}:")
-            print(f"Laravel version: {laravel_version}")
-            print(f"PHP version: {php_version}")
-            branches = list(app.get_branches())
-            branch_names = [branch.name for branch in branches]
-
-            # Find the branch with the newest Laravel version
-            newest_branch, newest_version = self.find_newest_laravel_version_branch(app, branches)
-
-            return LaravelStats(
-                repo=full_name,
-                description=repo.description or 'No description',
-                default_laravel_version=laravel_version,
-                php_version=php_version,
-                branches=branch_names,
-                newest_laravel_branch=newest_branch,
-                newest_laravel_version=newest_version,
-            )
-
-        except GithubException as e:
-            print(f"No composer.json in {full_name}: skipping")
-
-        return None
-
 if __name__ == "__main__":
-    agent = LaravelStatsAgent("UoGSoE")
-    results = agent.get_laravel_versions_in_projects()
-
-    # Optionally, save results to a JSON file
-    with open("laravel_versions.json", "w") as f:
-        json.dump(results, f, indent=2)
+    agent = LaravelStatsAgent(sys.argv[1])
+    result = agent.run()
+    print(result)
