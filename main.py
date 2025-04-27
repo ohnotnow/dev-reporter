@@ -12,17 +12,10 @@ from agents.github_stats import GithubStatsAgent
 from agents.checkout import CheckoutAgent
 from agents.composer_stats import ComposerStatsAgent
 from agents.code_stats import CodeStatsAgent
-
+from agents.reporter import Reporter
+from models.repo_stats import RepoStats
+from agents.project_type import ProjectTypeAgent
 dotenv.load_dotenv(override=True)
-
-class RepoStats(BaseModel):
-    name: str
-    url: str
-    description: str
-    github_stats: dict
-    composer_stats: dict
-    laravel_stats: dict
-    code_stats: dict
 
 def get_github_auth():
     return Auth.Token(os.getenv("GITHUB_API_TOKEN"))
@@ -70,18 +63,24 @@ def main(entity_type: str, entity_name: str):
 
 def test_get_list_of_projects(base_type: str, name: str):
     repos = get_list_of_repos(base_type, name)
+    repo_stats_list = []
     for repo in repos:
         print(repo.name)
         stats_agent = GithubStatsAgent(repo)
-        stats = stats_agent.run()
+        github_stats = stats_agent.run()
         print("## Github Stats")
-        print(stats)
+        print(github_stats)
         checkout_agent = CheckoutAgent(repo.clone_url)
         temp_dir = checkout_agent.run()
         composer_stats_agent = ComposerStatsAgent(temp_dir)
         composer_stats = composer_stats_agent.run()
         print("## Composer Stats")
         print(composer_stats)
+        project_type_agent = ProjectTypeAgent(temp_dir)
+        project_type = project_type_agent.run()
+        print("## Project Type")
+        print(f"Language: {project_type.language}")
+        print(f"Framework: {project_type.framework}")
         laravel_stats_agent = LaravelStatsAgent(temp_dir)
         laravel_stats = laravel_stats_agent.run()
         print("## Laravel Stats")
@@ -90,7 +89,22 @@ def test_get_list_of_projects(base_type: str, name: str):
         code_stats = code_stats_agent.run()
         print("## Code Stats")
         print(code_stats)
+        print(f"## {repo.name} Stats")
+        combined_stats = RepoStats(
+            repo_name=repo.name,
+            repo_url=repo.clone_url,
+            repo_description=repo.description,
+            github_stats=github_stats,
+            composer_stats=composer_stats,
+            laravel_stats=laravel_stats,
+            code_stats=code_stats,
+            repo_type=f"{project_type.language} / {project_type.framework}",
+        )
+        repo_stats_list.append(combined_stats)
         checkout_agent.cleanup()
+    reporter = Reporter(repo_stats_list)
+    report = reporter.run()
+    print(report)
     exit()
 
     org_name = "UoGSoE"

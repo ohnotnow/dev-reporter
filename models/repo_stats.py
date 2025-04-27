@@ -8,6 +8,7 @@ class RepoStats(BaseModel):
     repo_name: str
     repo_url: str
     repo_description: str
+    repo_type: str
     composer_stats: ComposerStats
     github_stats: GithubStats
     laravel_stats: LaravelStats

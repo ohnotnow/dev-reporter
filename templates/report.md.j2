@@ -1,0 +1,23 @@
+# IT Management Report
+
+## Executive Summary
+{{ summary_text }}
+
+## Key Statistics
+{{ summary_stats }}
+
+## Review
+{{ summary_review }}
+
+## Recommendations
+{% for rec in recommendations %}- {{ rec }}
+{% endfor %}
+
+---
+
+# Repository Appendices
+{% for repo_report in repo_reports %}
+{{ repo_report }}
+
+---
+{% endfor %}

@@ -1,0 +1,28 @@
+## {{ repo.repo_name }}
+[{{ repo.repo_url }}]({{ repo.repo_url }})
+
+**Description:** {{ repo.repo_description }}
+
+### GitHub Stats
+- Primary Language: {{ repo.github_stats.primary_language }}
+- Open Issues: {{ repo.github_stats.num_open_issues }}
+- Closed Issues (30d): {{ repo.github_stats.num_closed_issues_30d }}
+- Open PRs: {{ repo.github_stats.num_open_prs }}
+- Merged PRs (30d): {{ repo.github_stats.num_merged_prs_30d }}
+- Dependabot Alerts: {{ repo.github_stats.dependabot_issues|length }}
+
+### Composer Stats
+- Packages: {{ repo.composer_stats.packages|length }}
+- Security Advisories: {{ repo.composer_stats.packages | map(attribute='security_advisories') | map('length') | sum }}
+
+### Laravel Stats
+- PHP Version: {{ repo.laravel_stats.php_version }}
+- Current Laravel Version: {{ repo.laravel_stats.current_laravel_version }}
+- Newest Laravel Branch: {{ repo.laravel_stats.newest_laravel_branch }}
+- Newest Laravel Version: {{ repo.laravel_stats.newest_laravel_version }}
+
+### Code Stats
+- Languages: {% for lang in repo.code_stats.language_summary %}{{ lang.name }} ({{ lang.code }} LOC){% if not loop.last %}, {% endif %}{% endfor %}
+- Estimated Cost: ${{ repo.code_stats.estimated_cost | round(2) }}
+- Estimated Schedule: {{ repo.code_stats.estimated_schedule_months | round(1) }} months
+- Estimated People: {{ repo.code_stats.estimated_people | round(2) }}
