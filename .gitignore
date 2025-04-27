@@ -1,0 +1,6 @@
+**/__pycache__
+*.png
+*.json
+claude.py
+gpt.py
+.DS_Store

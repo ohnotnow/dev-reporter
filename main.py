@@ -4,11 +4,14 @@ import json
 import argparse
 import subprocess
 from pydantic import BaseModel
-from github import Github, Auth, GithubException
+from github import Github, GithubException
+from github import Auth
 from github.Repository import Repository
 from agents.laravel_stats import LaravelStatsAgent
-# from agents.composer_stats_agent import ComposerStatsAgent
-# from agents.github_agent import GithubAgent
+from agents.github_stats import GithubStatsAgent
+from agents.checkout import CheckoutAgent
+from agents.composer_stats import ComposerStatsAgent
+from agents.code_stats import CodeStatsAgent
 
 dotenv.load_dotenv(override=True)
 
@@ -25,7 +28,7 @@ def get_github_auth():
     return Auth.Token(os.getenv("GITHUB_API_TOKEN"))
 
 def get_github_client() -> Github:
-    return Github(get_github_auth())
+    return Github(auth=get_github_auth())
 
 def get_list_of_repos(entity_type: str, entity_name: str) -> list[Repository]:
     github_client = get_github_client()
@@ -44,31 +47,50 @@ def main(entity_type: str, entity_name: str):
     for i, repo in enumerate(repos):
         results[repo.name] = {}
         print(f"- Processing {repo.name} ({i+1}/{len(repos)})")
-        agent = GithubStatsAgent(repo)
-        github_stats = agent.run()
-        temp_dir = checkout_repo(repo.clone_url)
-        composer_stats_agent = ComposerStatsAgent(temp_dir)
-        composer_stats = composer_stats_agent.run()
-        laravel_stats_agent = LaravelStatsAgent(temp_dir)
-        laravel_stats = laravel_stats_agent.run()
-        code_stats_agent = CodeStatsAgent(temp_dir)
-        code_stats = code_stats_agent.run()
-        results[repo.name] = RepoStats(
-            name=repo.name,
-            url=repo.clone_url,
-            description=repo.description,
-            github_stats=github_stats,
-            composer_stats=composer_stats,
-            laravel_stats=laravel_stats,
-            code_stats=code_stats,
-        )
-    print(results)
-    print(temp_dir)
+        # agent = GithubStatsAgent(repo)
+    #     github_stats = agent.run()
+    #     temp_dir = checkout_repo(repo.clone_url)
+    #     composer_stats_agent = ComposerStatsAgent(temp_dir)
+    #     composer_stats = composer_stats_agent.run()
+    #     laravel_stats_agent = LaravelStatsAgent(temp_dir)
+    #     laravel_stats = laravel_stats_agent.run()
+    #     code_stats_agent = CodeStatsAgent(temp_dir)
+    #     code_stats = code_stats_agent.run()
+    #     results[repo.name] = RepoStats(
+    #         name=repo.name,
+    #         url=repo.clone_url,
+    #         description=repo.description,
+    #         github_stats=github_stats,
+    #         composer_stats=composer_stats,
+    #         laravel_stats=laravel_stats,
+    #         code_stats=code_stats,
+    #     )
+    # print(results)
+    # print(temp_dir)
 
 def test_get_list_of_projects(base_type: str, name: str):
-    stats_agent = LaravelStatsAgent(base_type, name)
-    stats = stats_agent.get_laravel_versions_in_projects()
-    print(stats)
+    repos = get_list_of_repos(base_type, name)
+    for repo in repos:
+        print(repo.name)
+        stats_agent = GithubStatsAgent(repo)
+        stats = stats_agent.run()
+        print("## Github Stats")
+        print(stats)
+        checkout_agent = CheckoutAgent(repo.clone_url)
+        temp_dir = checkout_agent.run()
+        composer_stats_agent = ComposerStatsAgent(temp_dir)
+        composer_stats = composer_stats_agent.run()
+        print("## Composer Stats")
+        print(composer_stats)
+        laravel_stats_agent = LaravelStatsAgent(temp_dir)
+        laravel_stats = laravel_stats_agent.run()
+        print("## Laravel Stats")
+        print(laravel_stats)
+        code_stats_agent = CodeStatsAgent(temp_dir)
+        code_stats = code_stats_agent.run()
+        print("## Code Stats")
+        print(code_stats)
+        checkout_agent.cleanup()
     exit()
 
     org_name = "UoGSoE"
